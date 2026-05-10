@@ -251,9 +251,9 @@ export default function CanvasHost() {
       if (activeToolName.current === 'pencil') {
         const ppts = (previewEl.current as Partial<PolyElement> | null)?.points
         const curLen = ppts?.length ?? 0
-        if (curLen > pencilPrevPointsLen.current && ppts && ppts.length >= 2) {
-          const last = ppts[ppts.length - 1]
-          const prev = ppts[ppts.length - 2]
+        if (curLen > pencilPrevPointsLen.current && curLen >= 2) {
+          const last = ppts![curLen - 1]
+          const prev = ppts![curLen - 2]
           pencilRunningLength.current += Math.hypot(last.x - prev.x, last.y - prev.y)
         }
         pencilPrevPointsLen.current = curLen
