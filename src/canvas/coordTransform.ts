@@ -61,13 +61,53 @@ function elementSnapPoints(el: GardenElement): Point[] {
   return []
 }
 
+/**
+ * Returns the unique X and Y axis values that represent element **edges only**
+ * (no centres or midpoints). Used for axis-alignment snapping so the guide
+ * lines align to real edges rather than interior reference points.
+ */
+function elementEdgeAxes(el: GardenElement): { xs: number[]; ys: number[] } {
+  if (el.type === 'rect') {
+    return { xs: [el.x, el.x + el.width], ys: [el.y, el.y + el.height] }
+  }
+  if (el.type === 'circle') {
+    return {
+      xs: [el.cx - el.radius, el.cx + el.radius],
+      ys: [el.cy - el.radius, el.cy + el.radius],
+    }
+  }
+  if (el.type === 'poly' || el.type === 'line') {
+    // Each vertex is an actual edge point
+    return {
+      xs: el.points.map((p) => p.x),
+      ys: el.points.map((p) => p.y),
+    }
+  }
+  if (el.type === 'symbol') {
+    // Snap to outer edges (centre ± scale)
+    return {
+      xs: [el.cx - el.scale, el.cx + el.scale],
+      ys: [el.cy - el.scale, el.cy + el.scale],
+    }
+  }
+  return { xs: [], ys: [] }
+}
+
 export interface SnapResult {
   x: number
   y: number
   snapped: boolean
+  /** When axis-alignment snapping is active, indicates which axes are aligned */
+  alignedAxis?: 'x' | 'y' | 'xy'
 }
 
-/** Grid snap + optional element-edge magnetic snap. */
+/** Grid snap + element-edge magnetic snap + axis-alignment snap.
+ *
+ * Priority order:
+ *   1. Exact point snap (corner / centre / midpoint) — strongest
+ *   2. Axis-alignment snap (same X or Y as another element's edge) — assistive
+ *   3. Grid snap — fallback
+ */
 export function snapPoint(
   wx: number,
   wy: number,
@@ -78,7 +118,7 @@ export function snapPoint(
 ): SnapResult {
   if (!snapEnabled) return { x: wx, y: wy, snapped: false }
 
-  // Try element edge snap first
+  // 1. Try exact point snap
   let bestDist = EDGE_SNAP_THRESHOLD
   let bestPt: Point | null = null
 
@@ -95,7 +135,44 @@ export function snapPoint(
 
   if (bestPt) return { x: bestPt.x, y: bestPt.y, snapped: true }
 
-  // Fall back to grid snap
+  // 2. Axis-alignment snap — snap X and/or Y independently to element edge axes.
+  //    Intentionally uses only real edges (not centres/midpoints) so guide lines
+  //    align to actual element boundaries.
+  //    Uses a slightly larger threshold than exact-point snap to feel assistive.
+  const axisThreshold = EDGE_SNAP_THRESHOLD * 1.5
+  let snapX: number | null = null
+  let snapY: number | null = null
+  let bestXDist = axisThreshold
+  let bestYDist = axisThreshold
+
+  for (const el of elements) {
+    if (excludeIds.includes(el.id)) continue
+    const { xs, ys } = elementEdgeAxes(el)
+    for (const ex of xs) {
+      const dx = Math.abs(ex - wx)
+      if (dx < bestXDist) { bestXDist = dx; snapX = ex }
+    }
+    for (const ey of ys) {
+      const dy = Math.abs(ey - wy)
+      if (dy < bestYDist) { bestYDist = dy; snapY = ey }
+    }
+  }
+
+  if (snapX !== null || snapY !== null) {
+    const rx = snapX ?? wx
+    const ry = snapY ?? wy
+    let alignedAxis: 'x' | 'y' | 'xy'
+    if (snapX !== null && snapY !== null) {
+      alignedAxis = 'xy'
+    } else if (snapX !== null) {
+      alignedAxis = 'x'
+    } else {
+      alignedAxis = 'y'
+    }
+    return { x: rx, y: ry, snapped: true, alignedAxis }
+  }
+
+  // 3. Fall back to grid snap
   const g = snapToGrid(wx, wy, gridStep)
   return { x: g.x, y: g.y, snapped: false }
 }

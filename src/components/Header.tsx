@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useGardenStore } from '@/store/gardenStore'
 import { exportPng } from '@/lib/exportPng'
 import { exportPdf } from '@/lib/exportPdf'
@@ -12,6 +12,20 @@ export default function Header() {
   const snap = useGardenStore((s) => s.interaction.snapEnabled)
   const { undo, redo, setShowGrid, setSnapEnabled, setUI, ui, resetView } = useGardenStore()
   const [exporting, setExporting] = useState<'pdf' | 'png' | null>(null)
+  const [exportOpen, setExportOpen] = useState(false)
+  const exportContainerRef = useRef<HTMLDivElement>(null)
+
+  // Close export menu on outside click
+  useEffect(() => {
+    if (!exportOpen) return
+    function onPointerDown(e: PointerEvent) {
+      if (!exportContainerRef.current?.contains(e.target as Node)) {
+        setExportOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [exportOpen])
 
   async function handleExportPdf() {
     if (!project || exporting) return
@@ -127,20 +141,39 @@ export default function Header() {
         <div className="w-px h-5 bg-neutral-700 mx-1" />
 
         {/* Export menu */}
-        <div className="relative group">
-          <button className="hbtn hbtn-primary">⬇ Export</button>
-          <div className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700
-            rounded-lg shadow-xl w-44 py-1 hidden group-hover:block z-50">
-            <button onClick={handleExportPng} disabled={!!exporting} className="menu-item disabled:opacity-50">
-              {exporting ? '⏳ Exporting…' : '📸 Export PNG'}
-            </button>
-            <button onClick={handleExportPdf} disabled={!!exporting} className="menu-item disabled:opacity-50">
-              {exporting ? '⏳ Exporting…' : '📄 Export PDF (A4)'}
-            </button>
-            <div className="h-px bg-neutral-700 my-1" />
-            <button onClick={handleExportJson} className="menu-item">💾 Save as JSON</button>
-            <button onClick={handleImportJson} className="menu-item">📂 Import JSON</button>
-          </div>
+        <div
+          ref={exportContainerRef}
+          className="relative"
+          onMouseEnter={() => setExportOpen(true)}
+          onMouseLeave={() => setExportOpen(false)}
+        >
+          <button
+            className="hbtn hbtn-primary"
+            onClick={() => setExportOpen((o) => !o)}
+            aria-haspopup="menu"
+            aria-expanded={exportOpen}
+            aria-controls="export-menu"
+          >
+            ⬇ Export
+          </button>
+          {exportOpen && (
+            <div
+              id="export-menu"
+              role="menu"
+              className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700
+                rounded-lg shadow-xl w-44 py-1 z-50"
+            >
+              <button role="menuitem" onClick={handleExportPng} disabled={!!exporting} className="menu-item disabled:opacity-50">
+                {exporting ? '⏳ Exporting…' : '📸 Export PNG'}
+              </button>
+              <button role="menuitem" onClick={handleExportPdf} disabled={!!exporting} className="menu-item disabled:opacity-50">
+                {exporting ? '⏳ Exporting…' : '📄 Export PDF (A4)'}
+              </button>
+              <div className="h-px bg-neutral-700 my-1" role="separator" />
+              <button role="menuitem" onClick={handleExportJson} className="menu-item">💾 Save as JSON</button>
+              <button role="menuitem" onClick={handleImportJson} className="menu-item">📂 Import JSON</button>
+            </div>
+          )}
         </div>
       </div>
     </header>

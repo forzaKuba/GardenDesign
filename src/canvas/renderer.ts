@@ -6,6 +6,7 @@ import { SYMBOL_MAP } from '@/symbols/index'
 import { worldToScreen } from './coordTransform'
 import { getBbox, getHandles, Handle } from './hitTest'
 import { HANDLE_RADIUS } from '@/constants/grid'
+import { formatDistance, formatArea } from '@/features/measurements/formatDistance'
 
 // ── Image cache ───────────────────────────────────────────────────────────────
 
@@ -33,7 +34,7 @@ export interface RendererState {
   gridStep: number
   canvasBackground: 'light' | 'dark'
   previewElement: Partial<GardenElement> | null
-  snapIndicator: { wx: number; wy: number } | null
+  snapIndicator: { wx: number; wy: number; alignedAxis?: 'x' | 'y' | 'xy' } | null
 }
 
 // ── Main render ───────────────────────────────────────────────────────────────
@@ -118,6 +119,28 @@ export function render(
     ctx.strokeStyle = 'rgba(26,111,224,0.7)'
     ctx.lineWidth = 1
     ctx.setLineDash([3, 3])
+
+    // Draw axis alignment guide lines when snapping to an element edge axis
+    if (snapIndicator.alignedAxis) {
+      ctx.strokeStyle = 'rgba(26,111,224,0.35)'
+      ctx.lineWidth = 0.8
+      if (snapIndicator.alignedAxis === 'x' || snapIndicator.alignedAxis === 'xy') {
+        ctx.beginPath()
+        ctx.moveTo(s.x, 0)
+        ctx.lineTo(s.x, H)
+        ctx.stroke()
+      }
+      if (snapIndicator.alignedAxis === 'y' || snapIndicator.alignedAxis === 'xy') {
+        ctx.beginPath()
+        ctx.moveTo(0, s.y)
+        ctx.lineTo(W, s.y)
+        ctx.stroke()
+      }
+    }
+
+    // Crosshair at snap point
+    ctx.strokeStyle = 'rgba(26,111,224,0.7)'
+    ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(s.x - 8, s.y)
     ctx.lineTo(s.x + 8, s.y)
@@ -472,7 +495,9 @@ function drawDimensionEl(
   }
 
   // Label
-  const distM = el.unit === 'm' ? `${len.toFixed(2)} m` : `${(len * 3.28084).toFixed(2)} ft`
+  const distM = el.unit === 'm'
+    ? formatDistance(len)
+    : `${(len * 3.28084).toFixed(1)} ft`
   const lx = (mx1 + mx2) / 2, ly = (my1 + my2) / 2
   ctx.fillStyle = 'rgba(20,60,180,0.9)'
   ctx.font = 'bold 11px DM Mono, monospace'
@@ -510,7 +535,7 @@ function drawAreaLabel(ctx: CanvasRenderingContext2D, area: number, cx: number, 
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillStyle = 'rgba(40,40,40,0.55)'
-  ctx.fillText(`${area.toFixed(1)} m²`, cx, cy)
+  ctx.fillText(formatArea(area), cx, cy)
   ctx.textBaseline = 'alphabetic'
   ctx.restore()
 }
@@ -614,16 +639,16 @@ function drawDimensions(
 
   if (el.type === 'rect' || el.type === 'image') {
     const sb = worldToScreen(b.x + b.w / 2, b.y + b.h, view)
-    ctx.fillText(`${el.type === 'rect' ? el.width : el.width}m`, sb.x, sb.y + 4)
+    ctx.fillText(formatDistance(el.width), sb.x, sb.y + 4)
     const sr = worldToScreen(b.x + b.w, b.y + b.h / 2, view)
     ctx.save()
     ctx.translate(sr.x + 14, sr.y)
     ctx.rotate(Math.PI / 2)
-    ctx.fillText(`${el.type === 'rect' ? el.height : el.height}m`, 0, 0)
+    ctx.fillText(formatDistance(el.height), 0, 0)
     ctx.restore()
   } else if (el.type === 'circle') {
     const sb = worldToScreen(el.cx, el.cy + el.radius, view)
-    ctx.fillText(`⌀${(el.radius * 2).toFixed(1)}m`, sb.x, sb.y + 4)
+    ctx.fillText(`⌀ ${formatDistance(el.radius * 2)}`, sb.x, sb.y + 4)
   } else if (el.type === 'line') {
     const pts = el.points
     if (pts.length >= 2) {
@@ -633,11 +658,11 @@ function drawDimensions(
         return s + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
       }, 0)
       const sm = worldToScreen((pts[0].x + last.x) / 2, (pts[0].y + last.y) / 2, view)
-      ctx.fillText(`${len.toFixed(1)}m`, sm.x, sm.y - 14)
+      ctx.fillText(formatDistance(len), sm.x, sm.y - 14)
     }
   } else if (el.type === 'poly' && el.closed) {
     const sb = worldToScreen(b.x + b.w / 2, b.y + b.h, view)
-    ctx.fillText(`${b.w.toFixed(1)}×${b.h.toFixed(1)}m`, sb.x, sb.y + 4)
+    ctx.fillText(`${formatDistance(b.w)} × ${formatDistance(b.h)}`, sb.x, sb.y + 4)
   }
 
   ctx.textBaseline = 'alphabetic'
