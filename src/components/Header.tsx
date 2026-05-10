@@ -31,6 +31,7 @@ export default function Header() {
     if (!canvas) return
     setExporting('png')
     try {
+      await new Promise<void>(resolve => setTimeout(resolve, 0))
       exportPng(canvas, `${project?.name ?? 'garden'}.png`)
     } finally {
       setExporting(null)
@@ -131,10 +132,10 @@ export default function Header() {
           <div className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700
             rounded-lg shadow-xl w-44 py-1 hidden group-hover:block z-50">
             <button onClick={handleExportPng} disabled={!!exporting} className="menu-item disabled:opacity-50">
-              {exporting === 'png' ? '⏳ Exporting…' : '📸 Export PNG'}
+              {exporting ? '⏳ Exporting…' : '📸 Export PNG'}
             </button>
             <button onClick={handleExportPdf} disabled={!!exporting} className="menu-item disabled:opacity-50">
-              {exporting === 'pdf' ? '⏳ Exporting…' : '📄 Export PDF (A4)'}
+              {exporting ? '⏳ Exporting…' : '📄 Export PDF (A4)'}
             </button>
             <div className="h-px bg-neutral-700 my-1" />
             <button onClick={handleExportJson} className="menu-item">💾 Save as JSON</button>
