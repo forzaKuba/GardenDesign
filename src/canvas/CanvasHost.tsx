@@ -8,8 +8,69 @@ import { topElementAt } from './hitTest'
 import { toolRegistry } from './tools/index'
 import { useRAFLoop } from '@/hooks/useRAFLoop'
 import type { GardenElement } from '@/types/elements'
+import type { LineElement, RectElement, CircleElement, PolyElement } from '@/types/elements'
 import type { CanvasPointerEvent } from '@/types/tools'
 import { MIN_ZOOM, MAX_ZOOM } from '@/constants/grid'
+
+// ── Measurement tooltip helpers ───────────────────────────────────────────────
+
+function formatLength(meters: number): string {
+  if (meters < 0.005) return '0 cm'
+  let m = Math.floor(meters)
+  let cm = Math.round((meters - m) * 100)
+  // Carry if rounding pushes cm to 100
+  if (cm >= 100) { m += 1; cm = 0 }
+  if (m === 0) return `${cm} cm`
+  if (cm === 0) return `${m} m`
+  return `${m} m ${cm} cm`
+}
+
+function getMeasurementText(
+  el: Partial<GardenElement> | null,
+  activeTool: string,
+  pencilRunningLength?: number,
+): string | null {
+  if (!el) return null
+  switch (el.type) {
+    case 'line': {
+      const pts = (el as Partial<LineElement>).points
+      if (!pts || pts.length < 2) return null
+      const len = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)
+      return formatLength(len)
+    }
+    case 'rect': {
+      const r = el as Partial<RectElement>
+      if (r.width == null || r.height == null) return null
+      return `${formatLength(r.width)} × ${formatLength(r.height)}`
+    }
+    case 'circle': {
+      const c = el as Partial<CircleElement>
+      if (c.radius == null) return null
+      return `r ${formatLength(c.radius)} ⌀ ${formatLength(c.radius * 2)}`
+    }
+    case 'poly': {
+      const p = el as Partial<PolyElement>
+      if (!p.points || p.points.length < 2) return null
+      const pts = p.points
+      // For pencil free-draw: use O(1) running total tracked by the caller
+      if (activeTool === 'pencil') return formatLength(pencilRunningLength ?? 0)
+      // For poly tool: show current segment length + running total
+      const segLen = Math.hypot(
+        pts[pts.length - 1].x - pts[pts.length - 2].x,
+        pts[pts.length - 1].y - pts[pts.length - 2].y,
+      )
+      if (pts.length === 2) return formatLength(segLen)
+      // Compute total only for committed poly points (small n, not pencil)
+      let total = 0
+      for (let i = 1; i < pts.length; i++) {
+        total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
+      }
+      return `${formatLength(segLen)} (${formatLength(total)} total)`
+    }
+    default:
+      return null
+  }
+}
 
 const MM_W = 180
 const MM_H = 130
@@ -27,6 +88,10 @@ export default function CanvasHost() {
   const spaceDown = useRef(false)
   const panStart = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null)
   const activeToolName = useRef(useGardenStore.getState().interaction.activeTool)
+  const measureTooltipRef = useRef<HTMLDivElement>(null)
+  // Pencil incremental length tracking — avoids O(n) scan on every pointermove
+  const pencilRunningLength = useRef(0)
+  const pencilPrevPointsLen = useRef(0)
 
   const store = useGardenStore
 
@@ -78,6 +143,13 @@ export default function CanvasHost() {
       setPreviewElement: (el: Partial<GardenElement> | null) => {
         previewEl.current = el
         isDirty.current = true
+        // Hide tooltip immediately when preview is cleared (e.g. Escape, tool switch)
+        if (!el) {
+          const tt = measureTooltipRef.current
+          if (tt) tt.style.display = 'none'
+          pencilRunningLength.current = 0
+          pencilPrevPointsLen.current = 0
+        }
       },
       scheduleRender,
       promptText: (pos: { wx: number; wy: number }) => {
@@ -175,6 +247,33 @@ export default function CanvasHost() {
       const tool = toolRegistry[activeToolName.current]
       tool?.onMouseMove(pe, getToolContext())
 
+      // Pencil: update running length incrementally (O(1) per move)
+      if (activeToolName.current === 'pencil') {
+        const ppts = (previewEl.current as Partial<PolyElement> | null)?.points
+        const curLen = ppts?.length ?? 0
+        if (curLen > pencilPrevPointsLen.current && curLen >= 2) {
+          const last = ppts![curLen - 1]
+          const prev = ppts![curLen - 2]
+          pencilRunningLength.current += Math.hypot(last.x - prev.x, last.y - prev.y)
+        }
+        pencilPrevPointsLen.current = curLen
+      }
+
+      // Live measurement tooltip
+      const tt = measureTooltipRef.current
+      if (tt) {
+        const text = getMeasurementText(previewEl.current, activeToolName.current, pencilRunningLength.current)
+        if (text) {
+          tt.textContent = text
+          // Offset tooltip to the right and slightly above the cursor
+          tt.style.left = `${sx + 18}px`
+          tt.style.top = `${sy - 36}px`
+          tt.style.display = 'block'
+        } else {
+          tt.style.display = 'none'
+        }
+      }
+
       // Hover detection (select tool only)
       if (activeToolName.current === 'select') {
         const elements = store.getState().project?.elements ?? []
@@ -184,6 +283,12 @@ export default function CanvasHost() {
     }
 
     function onPointerUp(e: PointerEvent) {
+      // Hide measurement tooltip on release and reset pencil state
+      const tt = measureTooltipRef.current
+      if (tt) tt.style.display = 'none'
+      pencilRunningLength.current = 0
+      pencilPrevPointsLen.current = 0
+
       if (panStart.current) {
         panStart.current = null
         canvas!.style.cursor = spaceDown.current ? 'grab' : getCursorForTool(activeToolName.current)
@@ -331,6 +436,12 @@ export default function CanvasHost() {
       <canvas
         ref={canvasRef}
         style={{ width: size.w, height: size.h, display: 'block' }}
+      />
+      {/* Live measurement tooltip — positioned near cursor during drawing */}
+      <div
+        ref={measureTooltipRef}
+        style={{ display: 'none', position: 'absolute', pointerEvents: 'none' }}
+        className="bg-neutral-900/90 border border-neutral-600 text-white text-xs font-mono px-2 py-1 rounded shadow-lg whitespace-nowrap z-50"
       />
     </div>
   )
