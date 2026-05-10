@@ -61,6 +61,38 @@ function elementSnapPoints(el: GardenElement): Point[] {
   return []
 }
 
+/**
+ * Returns the unique X and Y axis values that represent element **edges only**
+ * (no centres or midpoints). Used for axis-alignment snapping so the guide
+ * lines align to real edges rather than interior reference points.
+ */
+function elementEdgeAxes(el: GardenElement): { xs: number[]; ys: number[] } {
+  if (el.type === 'rect') {
+    return { xs: [el.x, el.x + el.width], ys: [el.y, el.y + el.height] }
+  }
+  if (el.type === 'circle') {
+    return {
+      xs: [el.cx - el.radius, el.cx + el.radius],
+      ys: [el.cy - el.radius, el.cy + el.radius],
+    }
+  }
+  if (el.type === 'poly' || el.type === 'line') {
+    // Each vertex is an actual edge point
+    return {
+      xs: el.points.map((p) => p.x),
+      ys: el.points.map((p) => p.y),
+    }
+  }
+  if (el.type === 'symbol') {
+    // Snap to outer edges (centre ± scale)
+    return {
+      xs: [el.cx - el.scale, el.cx + el.scale],
+      ys: [el.cy - el.scale, el.cy + el.scale],
+    }
+  }
+  return { xs: [], ys: [] }
+}
+
 export interface SnapResult {
   x: number
   y: number
@@ -103,7 +135,9 @@ export function snapPoint(
 
   if (bestPt) return { x: bestPt.x, y: bestPt.y, snapped: true }
 
-  // 2. Axis-alignment snap — snap X and/or Y independently to element edge axes
+  // 2. Axis-alignment snap — snap X and/or Y independently to element edge axes.
+  //    Intentionally uses only real edges (not centres/midpoints) so guide lines
+  //    align to actual element boundaries.
   //    Uses a slightly larger threshold than exact-point snap to feel assistive.
   const axisThreshold = EDGE_SNAP_THRESHOLD * 1.5
   let snapX: number | null = null
@@ -113,11 +147,14 @@ export function snapPoint(
 
   for (const el of elements) {
     if (excludeIds.includes(el.id)) continue
-    for (const pt of elementSnapPoints(el)) {
-      const dx = Math.abs(pt.x - wx)
-      const dy = Math.abs(pt.y - wy)
-      if (dx < bestXDist) { bestXDist = dx; snapX = pt.x }
-      if (dy < bestYDist) { bestYDist = dy; snapY = pt.y }
+    const { xs, ys } = elementEdgeAxes(el)
+    for (const ex of xs) {
+      const dx = Math.abs(ex - wx)
+      if (dx < bestXDist) { bestXDist = dx; snapX = ex }
+    }
+    for (const ey of ys) {
+      const dy = Math.abs(ey - wy)
+      if (dy < bestYDist) { bestYDist = dy; snapY = ey }
     }
   }
 

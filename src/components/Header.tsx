@@ -150,23 +150,28 @@ export default function Header() {
           <button
             className="hbtn hbtn-primary"
             onClick={() => setExportOpen((o) => !o)}
-            aria-haspopup="true"
+            aria-haspopup="menu"
             aria-expanded={exportOpen}
+            aria-controls="export-menu"
           >
             ⬇ Export
           </button>
           {exportOpen && (
-            <div className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700
-              rounded-lg shadow-xl w-44 py-1 z-50">
-              <button onClick={handleExportPng} disabled={!!exporting} className="menu-item disabled:opacity-50">
+            <div
+              id="export-menu"
+              role="menu"
+              className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700
+                rounded-lg shadow-xl w-44 py-1 z-50"
+            >
+              <button role="menuitem" onClick={handleExportPng} disabled={!!exporting} className="menu-item disabled:opacity-50">
                 {exporting ? '⏳ Exporting…' : '📸 Export PNG'}
               </button>
-              <button onClick={handleExportPdf} disabled={!!exporting} className="menu-item disabled:opacity-50">
+              <button role="menuitem" onClick={handleExportPdf} disabled={!!exporting} className="menu-item disabled:opacity-50">
                 {exporting ? '⏳ Exporting…' : '📄 Export PDF (A4)'}
               </button>
-              <div className="h-px bg-neutral-700 my-1" />
-              <button onClick={handleExportJson} className="menu-item">💾 Save as JSON</button>
-              <button onClick={handleImportJson} className="menu-item">📂 Import JSON</button>
+              <div className="h-px bg-neutral-700 my-1" role="separator" />
+              <button role="menuitem" onClick={handleExportJson} className="menu-item">💾 Save as JSON</button>
+              <button role="menuitem" onClick={handleImportJson} className="menu-item">📂 Import JSON</button>
             </div>
           )}
         </div>

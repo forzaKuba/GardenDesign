@@ -1,4 +1,4 @@
-import { ReactNode, useState, useRef } from 'react'
+import { ReactNode, useState, useRef, useId, isValidElement, cloneElement } from 'react'
 
 interface TooltipProps {
   content: string
@@ -10,6 +10,7 @@ interface TooltipProps {
 export function Tooltip({ content, shortcut, children, side = 'right' }: TooltipProps) {
   const [visible, setVisible] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout>>()
+  const tooltipId = useId()
 
   function show() {
     timer.current = setTimeout(() => setVisible(true), 400)
@@ -25,11 +26,20 @@ export function Tooltip({ content, shortcut, children, side = 'right' }: Tooltip
       ? 'top-full mt-1 left-1/2 -translate-x-1/2'
       : 'bottom-full mb-1 left-1/2 -translate-x-1/2'
 
+  // Inject aria-describedby on the trigger element so assistive tech
+  // announces the tooltip content when it becomes visible.
+  const trigger = isValidElement(children)
+    ? cloneElement(children as React.ReactElement, {
+        'aria-describedby': visible ? tooltipId : undefined,
+      })
+    : children
+
   return (
     <div className="relative" onMouseEnter={show} onMouseLeave={hide}>
-      {children}
+      {trigger}
       {visible && (
         <div
+          id={tooltipId}
           role="tooltip"
           className={`absolute ${posClass} z-50 pointer-events-none whitespace-nowrap
             bg-neutral-900 border border-neutral-700 text-neutral-200
