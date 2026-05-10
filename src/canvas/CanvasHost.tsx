@@ -8,8 +8,66 @@ import { topElementAt } from './hitTest'
 import { toolRegistry } from './tools/index'
 import { useRAFLoop } from '@/hooks/useRAFLoop'
 import type { GardenElement } from '@/types/elements'
+import type { LineElement, RectElement, CircleElement, PolyElement } from '@/types/elements'
 import type { CanvasPointerEvent } from '@/types/tools'
 import { MIN_ZOOM, MAX_ZOOM } from '@/constants/grid'
+
+// ── Measurement tooltip helpers ───────────────────────────────────────────────
+
+function formatLength(meters: number): string {
+  if (meters < 0.005) return '0 cm'
+  const m = Math.floor(meters)
+  const cm = Math.round((meters - m) * 100)
+  if (m === 0) return `${cm} cm`
+  if (cm === 0) return `${m} m`
+  return `${m} m ${cm} cm`
+}
+
+function getMeasurementText(
+  el: Partial<GardenElement> | null,
+  activeTool: string,
+): string | null {
+  if (!el) return null
+  switch (el.type) {
+    case 'line': {
+      const pts = (el as Partial<LineElement>).points
+      if (!pts || pts.length < 2) return null
+      const len = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)
+      return formatLength(len)
+    }
+    case 'rect': {
+      const r = el as Partial<RectElement>
+      if (!r.width || !r.height) return null
+      return `${formatLength(r.width)} × ${formatLength(r.height)}`
+    }
+    case 'circle': {
+      const c = el as Partial<CircleElement>
+      if (!c.radius) return null
+      return `r ${formatLength(c.radius)}  ⌀ ${formatLength(c.radius * 2)}`
+    }
+    case 'poly': {
+      const p = el as Partial<PolyElement>
+      if (!p.points || p.points.length < 2) return null
+      const pts = p.points
+      // Compute total length of all segments
+      let total = 0
+      for (let i = 1; i < pts.length; i++) {
+        total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
+      }
+      // For pencil free-draw, only show total
+      if (activeTool === 'pencil') return formatLength(total)
+      // For poly tool: show current segment + total when multiple segments exist
+      const segLen = Math.hypot(
+        pts[pts.length - 1].x - pts[pts.length - 2].x,
+        pts[pts.length - 1].y - pts[pts.length - 2].y,
+      )
+      if (pts.length === 2) return formatLength(segLen)
+      return `${formatLength(segLen)}  (${formatLength(total)} total)`
+    }
+    default:
+      return null
+  }
+}
 
 const MM_W = 180
 const MM_H = 130
@@ -27,6 +85,7 @@ export default function CanvasHost() {
   const spaceDown = useRef(false)
   const panStart = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null)
   const activeToolName = useRef(useGardenStore.getState().interaction.activeTool)
+  const measureTooltipRef = useRef<HTMLDivElement>(null)
 
   const store = useGardenStore
 
@@ -175,6 +234,21 @@ export default function CanvasHost() {
       const tool = toolRegistry[activeToolName.current]
       tool?.onMouseMove(pe, getToolContext())
 
+      // Live measurement tooltip
+      const tt = measureTooltipRef.current
+      if (tt) {
+        const text = getMeasurementText(previewEl.current, activeToolName.current)
+        if (text) {
+          tt.textContent = text
+          // Offset tooltip to the right and slightly above the cursor
+          tt.style.left = `${sx + 18}px`
+          tt.style.top = `${sy - 36}px`
+          tt.style.display = 'block'
+        } else {
+          tt.style.display = 'none'
+        }
+      }
+
       // Hover detection (select tool only)
       if (activeToolName.current === 'select') {
         const elements = store.getState().project?.elements ?? []
@@ -184,6 +258,10 @@ export default function CanvasHost() {
     }
 
     function onPointerUp(e: PointerEvent) {
+      // Hide measurement tooltip on release
+      const tt = measureTooltipRef.current
+      if (tt) tt.style.display = 'none'
+
       if (panStart.current) {
         panStart.current = null
         canvas!.style.cursor = spaceDown.current ? 'grab' : getCursorForTool(activeToolName.current)
@@ -331,6 +409,12 @@ export default function CanvasHost() {
       <canvas
         ref={canvasRef}
         style={{ width: size.w, height: size.h, display: 'block' }}
+      />
+      {/* Live measurement tooltip — positioned near cursor during drawing */}
+      <div
+        ref={measureTooltipRef}
+        style={{ display: 'none', position: 'absolute', pointerEvents: 'none' }}
+        className="bg-neutral-900/90 border border-neutral-600 text-white text-xs font-mono px-2 py-1 rounded shadow-lg whitespace-nowrap z-50"
       />
     </div>
   )
