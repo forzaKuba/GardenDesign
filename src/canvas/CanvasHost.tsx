@@ -16,8 +16,10 @@ import { MIN_ZOOM, MAX_ZOOM } from '@/constants/grid'
 
 function formatLength(meters: number): string {
   if (meters < 0.005) return '0 cm'
-  const m = Math.floor(meters)
-  const cm = Math.round((meters - m) * 100)
+  let m = Math.floor(meters)
+  let cm = Math.round((meters - m) * 100)
+  // Carry if rounding pushes cm to 100
+  if (cm >= 100) { m += 1; cm = 0 }
   if (m === 0) return `${cm} cm`
   if (cm === 0) return `${m} m`
   return `${m} m ${cm} cm`
@@ -26,6 +28,7 @@ function formatLength(meters: number): string {
 function getMeasurementText(
   el: Partial<GardenElement> | null,
   activeTool: string,
+  pencilRunningLength?: number,
 ): string | null {
   if (!el) return null
   switch (el.type) {
@@ -37,31 +40,31 @@ function getMeasurementText(
     }
     case 'rect': {
       const r = el as Partial<RectElement>
-      if (!r.width || !r.height) return null
+      if (r.width == null || r.height == null) return null
       return `${formatLength(r.width)} × ${formatLength(r.height)}`
     }
     case 'circle': {
       const c = el as Partial<CircleElement>
-      if (!c.radius) return null
+      if (c.radius == null) return null
       return `r ${formatLength(c.radius)} ⌀ ${formatLength(c.radius * 2)}`
     }
     case 'poly': {
       const p = el as Partial<PolyElement>
       if (!p.points || p.points.length < 2) return null
       const pts = p.points
-      // Compute total length of all segments
-      let total = 0
-      for (let i = 1; i < pts.length; i++) {
-        total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
-      }
-      // For pencil free-draw, only show total
-      if (activeTool === 'pencil') return formatLength(total)
-      // For poly tool: show current segment + total when multiple segments exist
+      // For pencil free-draw: use O(1) running total tracked by the caller
+      if (activeTool === 'pencil') return formatLength(pencilRunningLength ?? 0)
+      // For poly tool: show current segment length + running total
       const segLen = Math.hypot(
         pts[pts.length - 1].x - pts[pts.length - 2].x,
         pts[pts.length - 1].y - pts[pts.length - 2].y,
       )
       if (pts.length === 2) return formatLength(segLen)
+      // Compute total only for committed poly points (small n, not pencil)
+      let total = 0
+      for (let i = 1; i < pts.length; i++) {
+        total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
+      }
       return `${formatLength(segLen)} (${formatLength(total)} total)`
     }
     default:
@@ -86,6 +89,9 @@ export default function CanvasHost() {
   const panStart = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null)
   const activeToolName = useRef(useGardenStore.getState().interaction.activeTool)
   const measureTooltipRef = useRef<HTMLDivElement>(null)
+  // Pencil incremental length tracking — avoids O(n) scan on every pointermove
+  const pencilRunningLength = useRef(0)
+  const pencilPrevPointsLen = useRef(0)
 
   const store = useGardenStore
 
@@ -137,6 +143,13 @@ export default function CanvasHost() {
       setPreviewElement: (el: Partial<GardenElement> | null) => {
         previewEl.current = el
         isDirty.current = true
+        // Hide tooltip immediately when preview is cleared (e.g. Escape, tool switch)
+        if (!el) {
+          const tt = measureTooltipRef.current
+          if (tt) tt.style.display = 'none'
+          pencilRunningLength.current = 0
+          pencilPrevPointsLen.current = 0
+        }
       },
       scheduleRender,
       promptText: (pos: { wx: number; wy: number }) => {
@@ -234,10 +247,22 @@ export default function CanvasHost() {
       const tool = toolRegistry[activeToolName.current]
       tool?.onMouseMove(pe, getToolContext())
 
+      // Pencil: update running length incrementally (O(1) per move)
+      if (activeToolName.current === 'pencil') {
+        const ppts = (previewEl.current as Partial<PolyElement> | null)?.points
+        const curLen = ppts?.length ?? 0
+        if (curLen > pencilPrevPointsLen.current && ppts && ppts.length >= 2) {
+          const last = ppts[ppts.length - 1]
+          const prev = ppts[ppts.length - 2]
+          pencilRunningLength.current += Math.hypot(last.x - prev.x, last.y - prev.y)
+        }
+        pencilPrevPointsLen.current = curLen
+      }
+
       // Live measurement tooltip
       const tt = measureTooltipRef.current
       if (tt) {
-        const text = getMeasurementText(previewEl.current, activeToolName.current)
+        const text = getMeasurementText(previewEl.current, activeToolName.current, pencilRunningLength.current)
         if (text) {
           tt.textContent = text
           // Offset tooltip to the right and slightly above the cursor
@@ -258,9 +283,11 @@ export default function CanvasHost() {
     }
 
     function onPointerUp(e: PointerEvent) {
-      // Hide measurement tooltip on release
+      // Hide measurement tooltip on release and reset pencil state
       const tt = measureTooltipRef.current
       if (tt) tt.style.display = 'none'
+      pencilRunningLength.current = 0
+      pencilPrevPointsLen.current = 0
 
       if (panStart.current) {
         panStart.current = null
