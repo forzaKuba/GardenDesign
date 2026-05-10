@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useGardenStore } from '@/store/gardenStore'
 import { exportPng } from '@/lib/exportPng'
 import { exportPdf } from '@/lib/exportPdf'
@@ -10,18 +11,30 @@ export default function Header() {
   const showGrid = useGardenStore((s) => s.project?.showGrid ?? true)
   const snap = useGardenStore((s) => s.interaction.snapEnabled)
   const { undo, redo, setShowGrid, setSnapEnabled, setUI, ui, resetView } = useGardenStore()
+  const [exporting, setExporting] = useState<'pdf' | 'png' | null>(null)
 
   async function handleExportPdf() {
-    if (!project) return
+    if (!project || exporting) return
     const canvas = document.querySelector('canvas') as HTMLCanvasElement | null
     if (!canvas) return
-    await exportPdf(canvas, project, 'landscape')
+    setExporting('pdf')
+    try {
+      await exportPdf(canvas, project, 'landscape')
+    } finally {
+      setExporting(null)
+    }
   }
 
-  function handleExportPng() {
+  async function handleExportPng() {
+    if (exporting) return
     const canvas = document.querySelector('canvas') as HTMLCanvasElement | null
     if (!canvas) return
-    exportPng(canvas, `${project?.name ?? 'garden'}.png`)
+    setExporting('png')
+    try {
+      exportPng(canvas, `${project?.name ?? 'garden'}.png`)
+    } finally {
+      setExporting(null)
+    }
   }
 
   function handleExportJson() {
@@ -117,8 +130,12 @@ export default function Header() {
           <button className="hbtn hbtn-primary">⬇ Export</button>
           <div className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700
             rounded-lg shadow-xl w-44 py-1 hidden group-hover:block z-50">
-            <button onClick={handleExportPng} className="menu-item">📸 Export PNG</button>
-            <button onClick={handleExportPdf} className="menu-item">📄 Export PDF (A4)</button>
+            <button onClick={handleExportPng} disabled={!!exporting} className="menu-item disabled:opacity-50">
+              {exporting === 'png' ? '⏳ Exporting…' : '📸 Export PNG'}
+            </button>
+            <button onClick={handleExportPdf} disabled={!!exporting} className="menu-item disabled:opacity-50">
+              {exporting === 'pdf' ? '⏳ Exporting…' : '📄 Export PDF (A4)'}
+            </button>
             <div className="h-px bg-neutral-700 my-1" />
             <button onClick={handleExportJson} className="menu-item">💾 Save as JSON</button>
             <button onClick={handleImportJson} className="menu-item">📂 Import JSON</button>
