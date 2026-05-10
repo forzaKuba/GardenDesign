@@ -11,19 +11,9 @@ import type { GardenElement } from '@/types/elements'
 import type { LineElement, RectElement, CircleElement, PolyElement } from '@/types/elements'
 import type { CanvasPointerEvent } from '@/types/tools'
 import { MIN_ZOOM, MAX_ZOOM } from '@/constants/grid'
+import { formatDistance } from '@/features/measurements/formatDistance'
 
 // ── Measurement tooltip helpers ───────────────────────────────────────────────
-
-function formatLength(meters: number): string {
-  if (meters < 0.005) return '0 cm'
-  let m = Math.floor(meters)
-  let cm = Math.round((meters - m) * 100)
-  // Carry if rounding pushes cm to 100
-  if (cm >= 100) { m += 1; cm = 0 }
-  if (m === 0) return `${cm} cm`
-  if (cm === 0) return `${m} m`
-  return `${m} m ${cm} cm`
-}
 
 function getMeasurementText(
   el: Partial<GardenElement> | null,
@@ -36,36 +26,36 @@ function getMeasurementText(
       const pts = (el as Partial<LineElement>).points
       if (!pts || pts.length < 2) return null
       const len = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)
-      return formatLength(len)
+      return formatDistance(len)
     }
     case 'rect': {
       const r = el as Partial<RectElement>
       if (r.width == null || r.height == null) return null
-      return `${formatLength(r.width)} × ${formatLength(r.height)}`
+      return `${formatDistance(r.width)} × ${formatDistance(r.height)}`
     }
     case 'circle': {
       const c = el as Partial<CircleElement>
       if (c.radius == null) return null
-      return `r ${formatLength(c.radius)} ⌀ ${formatLength(c.radius * 2)}`
+      return `r ${formatDistance(c.radius)} ⌀ ${formatDistance(c.radius * 2)}`
     }
     case 'poly': {
       const p = el as Partial<PolyElement>
       if (!p.points || p.points.length < 2) return null
       const pts = p.points
       // For pencil free-draw: use O(1) running total tracked by the caller
-      if (activeTool === 'pencil') return formatLength(pencilRunningLength ?? 0)
+      if (activeTool === 'pencil') return formatDistance(pencilRunningLength ?? 0)
       // For poly tool: show current segment length + running total
       const segLen = Math.hypot(
         pts[pts.length - 1].x - pts[pts.length - 2].x,
         pts[pts.length - 1].y - pts[pts.length - 2].y,
       )
-      if (pts.length === 2) return formatLength(segLen)
+      if (pts.length === 2) return formatDistance(segLen)
       // Compute total only for committed poly points (small n, not pencil)
       let total = 0
       for (let i = 1; i < pts.length; i++) {
         total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
       }
-      return `${formatLength(segLen)} (${formatLength(total)} total)`
+      return `${formatDistance(segLen)} (${formatDistance(total)} total)`
     }
     default:
       return null
@@ -84,7 +74,7 @@ export default function CanvasHost() {
   // Mutable refs — not React state, to avoid re-renders
   const isDirty = useRef(true)
   const previewEl = useRef<Partial<GardenElement> | null>(null)
-  const snapIndicator = useRef<{ wx: number; wy: number } | null>(null)
+  const snapIndicator = useRef<{ wx: number; wy: number; alignedAxis?: 'x' | 'y' | 'xy' } | null>(null)
   const spaceDown = useRef(false)
   const panStart = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null)
   const activeToolName = useRef(useGardenStore.getState().interaction.activeTool)
@@ -178,7 +168,7 @@ export default function CanvasHost() {
         elements,
         selectedIds
       )
-      snapIndicator.current = snap.snapped ? { wx: snap.x, wy: snap.y } : null
+      snapIndicator.current = snap.snapped ? { wx: snap.x, wy: snap.y, alignedAxis: snap.alignedAxis } : null
       return {
         x: sx,
         y: sy,

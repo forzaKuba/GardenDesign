@@ -65,9 +65,17 @@ export interface SnapResult {
   x: number
   y: number
   snapped: boolean
+  /** When axis-alignment snapping is active, indicates which axes are aligned */
+  alignedAxis?: 'x' | 'y' | 'xy'
 }
 
-/** Grid snap + optional element-edge magnetic snap. */
+/** Grid snap + element-edge magnetic snap + axis-alignment snap.
+ *
+ * Priority order:
+ *   1. Exact point snap (corner / centre / midpoint) — strongest
+ *   2. Axis-alignment snap (same X or Y as another element's edge) — assistive
+ *   3. Grid snap — fallback
+ */
 export function snapPoint(
   wx: number,
   wy: number,
@@ -78,7 +86,7 @@ export function snapPoint(
 ): SnapResult {
   if (!snapEnabled) return { x: wx, y: wy, snapped: false }
 
-  // Try element edge snap first
+  // 1. Try exact point snap
   let bestDist = EDGE_SNAP_THRESHOLD
   let bestPt: Point | null = null
 
@@ -95,7 +103,32 @@ export function snapPoint(
 
   if (bestPt) return { x: bestPt.x, y: bestPt.y, snapped: true }
 
-  // Fall back to grid snap
+  // 2. Axis-alignment snap — snap X and/or Y independently to element edge axes
+  //    Uses a slightly larger threshold than exact-point snap to feel assistive.
+  const axisThreshold = EDGE_SNAP_THRESHOLD * 1.5
+  let snapX: number | null = null
+  let snapY: number | null = null
+  let bestXDist = axisThreshold
+  let bestYDist = axisThreshold
+
+  for (const el of elements) {
+    if (excludeIds.includes(el.id)) continue
+    for (const pt of elementSnapPoints(el)) {
+      const dx = Math.abs(pt.x - wx)
+      const dy = Math.abs(pt.y - wy)
+      if (dx < bestXDist) { bestXDist = dx; snapX = pt.x }
+      if (dy < bestYDist) { bestYDist = dy; snapY = pt.y }
+    }
+  }
+
+  if (snapX !== null || snapY !== null) {
+    const rx = snapX ?? wx
+    const ry = snapY ?? wy
+    const alignedAxis = snapX !== null && snapY !== null ? 'xy' : snapX !== null ? 'x' : 'y'
+    return { x: rx, y: ry, snapped: true, alignedAxis }
+  }
+
+  // 3. Fall back to grid snap
   const g = snapToGrid(wx, wy, gridStep)
   return { x: g.x, y: g.y, snapped: false }
 }

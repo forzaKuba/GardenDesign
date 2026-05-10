@@ -1,0 +1,30 @@
+/**
+ * Centralized measurement formatting for the garden design canvas.
+ *
+ * Internal unit: metres (source of truth throughout the app).
+ * Display rules:
+ *   < 0.005 m  →  "0 cm"      (essentially zero — avoid noisy near-zero)
+ *   < 0.1 m    →  "N cm"      (integer centimetres for small values)
+ *   ≥ 0.1 m    →  "N.N m"     (one decimal place metres)
+ *
+ * Rounding is done at the integer/one-decimal level to prevent floating-point
+ * noise from producing values like "14.400000000001 m".
+ */
+
+/** Format a distance in metres for human display. */
+export function formatDistance(metres: number): string {
+  if (metres < 0.005) return '0 cm'
+  if (metres < 0.1) {
+    // Round to nearest centimetre
+    return `${Math.round(metres * 100)} cm`
+  }
+  // Round to one decimal place before formatting to avoid fp noise
+  const rounded = Math.round(metres * 10) / 10
+  return `${rounded.toFixed(1)} m`
+}
+
+/** Format an area in square metres for human display. */
+export function formatArea(sqMetres: number): string {
+  if (sqMetres < 0.01) return `${Math.round(sqMetres * 10000)} cm²`
+  return `${sqMetres.toFixed(1)} m²`
+}

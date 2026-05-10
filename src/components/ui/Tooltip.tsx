@@ -30,9 +30,11 @@ export function Tooltip({ content, shortcut, children, side = 'right' }: Tooltip
       {children}
       {visible && (
         <div
+          role="tooltip"
           className={`absolute ${posClass} z-50 pointer-events-none whitespace-nowrap
             bg-neutral-900 border border-neutral-700 text-neutral-200
-            px-2 py-1 rounded text-xs flex items-center gap-2 shadow-lg`}
+            px-2 py-1 rounded text-xs flex items-center gap-2 shadow-lg
+            animate-tooltip-fade`}
         >
           {content}
           {shortcut && (

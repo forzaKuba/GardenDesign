@@ -16,6 +16,15 @@ export default {
       width: {
         '13': '3.25rem',
       },
+      keyframes: {
+        'tooltip-fade': {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+      },
+      animation: {
+        'tooltip-fade': 'tooltip-fade 0.12s ease-out forwards',
+      },
     },
   },
   plugins: [],
