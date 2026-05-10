@@ -1,0 +1,342 @@
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { useGardenStore } from '@/store/gardenStore'
+import { render, RendererState } from './renderer'
+import { drawMinimap } from './minimap'
+import { screenToWorld } from './coordTransform'
+import { snapPoint } from './coordTransform'
+import { topElementAt } from './hitTest'
+import { toolRegistry } from './tools/index'
+import { useRAFLoop } from '@/hooks/useRAFLoop'
+import type { GardenElement } from '@/types/elements'
+import type { CanvasPointerEvent } from '@/types/tools'
+import { MIN_ZOOM, MAX_ZOOM } from '@/constants/grid'
+
+const MM_W = 180
+const MM_H = 130
+const MM_PAD = 12
+
+export default function CanvasHost() {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [size, setSize] = useState({ w: 800, h: 600 })
+
+  // Mutable refs — not React state, to avoid re-renders
+  const isDirty = useRef(true)
+  const previewEl = useRef<Partial<GardenElement> | null>(null)
+  const snapIndicator = useRef<{ wx: number; wy: number } | null>(null)
+  const spaceDown = useRef(false)
+  const panStart = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null)
+  const activeToolName = useRef(useGardenStore.getState().interaction.activeTool)
+
+  const store = useGardenStore
+
+  // ResizeObserver
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect
+      setSize({ w: width, h: height })
+      isDirty.current = true
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // Subscribe to store changes → mark dirty
+  useEffect(() => {
+    return store.subscribe(() => {
+      isDirty.current = true
+      activeToolName.current = store.getState().interaction.activeTool
+    })
+  }, [store])
+
+  const scheduleRender = useCallback(() => {
+    isDirty.current = true
+  }, [])
+
+  // Build ToolContext for the active tool
+  const getToolContext = useCallback(() => {
+    const canvas = canvasRef.current!
+    return {
+      addElement: (el: GardenElement) => store.getState().addElement(el),
+      updateElement: (id: string, patch: Partial<GardenElement>) =>
+        store.getState().updateElement(id, patch),
+      deleteElements: (ids: string[]) => store.getState().deleteElements(ids),
+      pushHistory: () => store.getState().pushHistory(),
+      getSelectedIds: () => store.getState().interaction.selectedIds,
+      setSelectedIds: (ids: string[]) => store.getState().setSelectedIds(ids),
+      addToSelection: (id: string) => store.getState().addToSelection(id),
+      getElements: () => store.getState().project?.elements ?? [],
+      getLayers: () => store.getState().project?.layers ?? [],
+      getView: () => store.getState().view,
+      isSnapEnabled: () => store.getState().interaction.snapEnabled,
+      getGridStep: () => store.getState().project?.gridStep ?? 1,
+      getActiveCategoryKey: () => store.getState().interaction.activeCategoryKey,
+      getActiveLayerId: () => store.getState().interaction.activeLayerId,
+      canvas,
+      setPreviewElement: (el: Partial<GardenElement> | null) => {
+        previewEl.current = el
+        isDirty.current = true
+      },
+      scheduleRender,
+      promptText: (pos: { wx: number; wy: number }) => {
+        store.getState().setPendingTextPos(pos)
+      },
+    }
+  }, [store, scheduleRender])
+
+  // Build CanvasPointerEvent
+  const buildPointerEvent = useCallback(
+    (e: PointerEvent): CanvasPointerEvent => {
+      const canvas = canvasRef.current!
+      const rect = canvas.getBoundingClientRect()
+      const sx = e.clientX - rect.left
+      const sy = e.clientY - rect.top
+      const view = store.getState().view
+      const { x: wx, y: wy } = screenToWorld(sx, sy, view)
+      const state = store.getState()
+      const elements = state.project?.elements ?? []
+      const selectedIds = state.interaction.selectedIds
+      const snap = snapPoint(
+        wx,
+        wy,
+        state.project?.gridStep ?? 1,
+        state.interaction.snapEnabled,
+        elements,
+        selectedIds
+      )
+      snapIndicator.current = snap.snapped ? { wx: snap.x, wy: snap.y } : null
+      return {
+        x: sx,
+        y: sy,
+        wx,
+        wy,
+        snappedWx: snap.x,
+        snappedWy: snap.y,
+        button: e.button,
+        shiftKey: e.shiftKey,
+        ctrlKey: e.ctrlKey || e.metaKey,
+        altKey: e.altKey,
+        originalEvent: e,
+      }
+    },
+    [store]
+  )
+
+  // Attach canvas events
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    function onPointerDown(e: PointerEvent) {
+      canvas!.setPointerCapture(e.pointerId)
+      const view = store.getState().view
+
+      // Middle mouse or Space+LMB → pan
+      if (e.button === 1 || (e.button === 0 && spaceDown.current)) {
+        panStart.current = { sx: e.clientX, sy: e.clientY, px: view.panX, py: view.panY }
+        canvas!.style.cursor = 'grabbing'
+        store.getState().setUI({ ...store.getState().ui })
+        return
+      }
+      if (e.button !== 0) return
+
+      const pe = buildPointerEvent(e)
+      const tool = toolRegistry[activeToolName.current]
+      tool?.onMouseDown(pe, getToolContext())
+    }
+
+    function onPointerMove(e: PointerEvent) {
+      const view = store.getState().view
+
+      // Update coordinate display
+      const canvas2 = canvasRef.current!
+      const rect = canvas2.getBoundingClientRect()
+      const sx = e.clientX - rect.left
+      const sy = e.clientY - rect.top
+      const { x: wx, y: wy } = screenToWorld(sx, sy, view)
+      store.getState().setUI({
+        ...store.getState().ui,
+        // We'll use a separate coord display — just mark dirty
+      })
+      // Store cursor world pos for status bar (via a DOM update outside React)
+      const coord = document.getElementById('coord-display')
+      if (coord) coord.textContent = `x: ${wx.toFixed(1)}m  y: ${wy.toFixed(1)}m`
+
+      if (panStart.current) {
+        const dx = e.clientX - panStart.current.sx
+        const dy = e.clientY - panStart.current.sy
+        store.getState().setView({ panX: panStart.current.px + dx, panY: panStart.current.py + dy })
+        return
+      }
+
+      const pe = buildPointerEvent(e)
+      const tool = toolRegistry[activeToolName.current]
+      tool?.onMouseMove(pe, getToolContext())
+
+      // Hover detection (select tool only)
+      if (activeToolName.current === 'select') {
+        const elements = store.getState().project?.elements ?? []
+        const hovered = topElementAt(pe.wx, pe.wy, elements)
+        store.getState().setHovered(hovered?.id ?? null)
+      }
+    }
+
+    function onPointerUp(e: PointerEvent) {
+      if (panStart.current) {
+        panStart.current = null
+        canvas!.style.cursor = spaceDown.current ? 'grab' : getCursorForTool(activeToolName.current)
+        return
+      }
+      if (e.button !== 0) return
+      const pe = buildPointerEvent(e)
+      const tool = toolRegistry[activeToolName.current]
+      tool?.onMouseUp(pe, getToolContext())
+      snapIndicator.current = null
+      isDirty.current = true
+    }
+
+    function onDblClick(e: MouseEvent) {
+      const pe = buildPointerEvent(e as unknown as PointerEvent)
+      const tool = toolRegistry[activeToolName.current]
+      tool?.onDblClick?.(pe, getToolContext())
+    }
+
+    function onWheel(e: WheelEvent) {
+      e.preventDefault()
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12
+      const rect = canvas!.getBoundingClientRect()
+      const cx = e.clientX - rect.left
+      const cy = e.clientY - rect.top
+      const view = store.getState().view
+      const nz = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, view.zoom * factor))
+      store.getState().setView({
+        zoom: nz,
+        panX: cx - (cx - view.panX) * (nz / view.zoom),
+        panY: cy - (cy - view.panY) * (nz / view.zoom),
+      })
+    }
+
+    function onContextMenu(e: Event) {
+      e.preventDefault()
+    }
+
+    canvas.addEventListener('pointerdown', onPointerDown)
+    canvas.addEventListener('pointermove', onPointerMove)
+    canvas.addEventListener('pointerup', onPointerUp)
+    canvas.addEventListener('dblclick', onDblClick)
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    canvas.addEventListener('contextmenu', onContextMenu)
+
+    return () => {
+      canvas.removeEventListener('pointerdown', onPointerDown)
+      canvas.removeEventListener('pointermove', onPointerMove)
+      canvas.removeEventListener('pointerup', onPointerUp)
+      canvas.removeEventListener('dblclick', onDblClick)
+      canvas.removeEventListener('wheel', onWheel)
+      canvas.removeEventListener('contextmenu', onContextMenu)
+    }
+  }, [store, buildPointerEvent, getToolContext])
+
+  // Keyboard: space pan + tool key forwarding
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.code === 'Space' && e.target === document.body) {
+        spaceDown.current = true
+        if (canvasRef.current) canvasRef.current.style.cursor = 'grab'
+        e.preventDefault()
+        return
+      }
+      const tool = toolRegistry[activeToolName.current]
+      if (tool?.onKeyDown && e.target === document.body) {
+        tool.onKeyDown(e, getToolContext())
+      }
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.code === 'Space') {
+        spaceDown.current = false
+        if (canvasRef.current)
+          canvasRef.current.style.cursor = getCursorForTool(activeToolName.current)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+    }
+  }, [getToolContext])
+
+  // RAF loop — render when dirty
+  useRAFLoop(() => {
+    if (!isDirty.current) return
+    isDirty.current = false
+
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const state = store.getState()
+    const project = state.project
+    if (!project) return
+
+    // Update canvas size (HiDPI)
+    const dpr = window.devicePixelRatio || 1
+    const targetW = size.w * dpr
+    const targetH = size.h * dpr
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW
+      canvas.height = targetH
+    }
+
+    const rendererState: RendererState = {
+      project,
+      view: state.view,
+      selectedIds: state.interaction.selectedIds,
+      hoveredId: state.interaction.hoveredId,
+      dragSelectRect: state.interaction.dragSelectRect,
+      showGrid: project.showGrid,
+      gridStep: project.gridStep,
+      canvasBackground: project.canvasBackground,
+      previewElement: previewEl.current,
+      snapIndicator: snapIndicator.current,
+    }
+
+    render(ctx, rendererState, scheduleRender)
+
+    // Minimap overlay
+    if (state.ui.showMinimap) {
+      const mmX = size.w - MM_W - MM_PAD
+      const mmY = size.h - MM_H - MM_PAD
+      const dpr2 = window.devicePixelRatio || 1
+      ctx.save()
+      ctx.scale(dpr2, dpr2)
+      drawMinimap(ctx, project.elements, state.view, size.w, size.h, mmX, mmY, MM_W, MM_H)
+      ctx.restore()
+    }
+
+    // Cursor
+    const cursor = panStart.current
+      ? 'grabbing'
+      : spaceDown.current
+        ? 'grab'
+        : getCursorForTool(state.interaction.activeTool)
+    if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor
+  })
+
+  return (
+    <div ref={containerRef} className="relative flex-1 overflow-hidden">
+      <canvas
+        ref={canvasRef}
+        style={{ width: size.w, height: size.h, display: 'block' }}
+      />
+    </div>
+  )
+}
+
+function getCursorForTool(tool: string): string {
+  if (tool === 'select') return 'default'
+  return 'crosshair'
+}

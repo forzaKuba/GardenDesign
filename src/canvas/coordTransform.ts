@@ -1,0 +1,120 @@
+import type { ViewState } from '@/types/tools'
+import type { GardenElement, Point } from '@/types/elements'
+import { EDGE_SNAP_THRESHOLD } from '@/constants/grid'
+
+// ── World ↔ Screen ────────────────────────────────────────────────────────────
+
+export function worldToScreen(wx: number, wy: number, view: ViewState): Point {
+  return {
+    x: view.panX + wx * view.zoom,
+    y: view.panY + wy * view.zoom,
+  }
+}
+
+export function screenToWorld(sx: number, sy: number, view: ViewState): Point {
+  return {
+    x: (sx - view.panX) / view.zoom,
+    y: (sy - view.panY) / view.zoom,
+  }
+}
+
+// ── Grid snap ────────────────────────────────────────────────────────────────
+
+export function snapToGrid(wx: number, wy: number, gridStep: number): Point {
+  return {
+    x: Math.round(wx / gridStep) * gridStep,
+    y: Math.round(wy / gridStep) * gridStep,
+  }
+}
+
+// ── Element snap points ───────────────────────────────────────────────────────
+
+function elementSnapPoints(el: GardenElement): Point[] {
+  if (el.type === 'rect') {
+    const { x, y, width: w, height: h } = el
+    return [
+      { x, y }, { x: x + w, y }, { x, y: y + h }, { x: x + w, y: y + h },
+      { x: x + w / 2, y }, { x: x + w / 2, y: y + h },
+      { x, y: y + h / 2 }, { x: x + w, y: y + h / 2 },
+      { x: x + w / 2, y: y + h / 2 },
+    ]
+  }
+  if (el.type === 'circle') {
+    const { cx, cy, radius: r } = el
+    return [
+      { x: cx, y: cy },
+      { x: cx - r, y: cy }, { x: cx + r, y: cy },
+      { x: cx, y: cy - r }, { x: cx, y: cy + r },
+    ]
+  }
+  if (el.type === 'poly' || el.type === 'line') {
+    const pts = el.points
+    const snap: Point[] = [...pts]
+    for (let i = 0; i < pts.length - 1; i++) {
+      snap.push({ x: (pts[i].x + pts[i + 1].x) / 2, y: (pts[i].y + pts[i + 1].y) / 2 })
+    }
+    return snap
+  }
+  if (el.type === 'symbol') {
+    return [{ x: el.cx, y: el.cy }]
+  }
+  return []
+}
+
+export interface SnapResult {
+  x: number
+  y: number
+  snapped: boolean
+}
+
+/** Grid snap + optional element-edge magnetic snap. */
+export function snapPoint(
+  wx: number,
+  wy: number,
+  gridStep: number,
+  snapEnabled: boolean,
+  elements: GardenElement[],
+  excludeIds: string[] = []
+): SnapResult {
+  if (!snapEnabled) return { x: wx, y: wy, snapped: false }
+
+  // Try element edge snap first
+  let bestDist = EDGE_SNAP_THRESHOLD
+  let bestPt: Point | null = null
+
+  for (const el of elements) {
+    if (excludeIds.includes(el.id)) continue
+    for (const pt of elementSnapPoints(el)) {
+      const d = Math.hypot(pt.x - wx, pt.y - wy)
+      if (d < bestDist) {
+        bestDist = d
+        bestPt = pt
+      }
+    }
+  }
+
+  if (bestPt) return { x: bestPt.x, y: bestPt.y, snapped: true }
+
+  // Fall back to grid snap
+  const g = snapToGrid(wx, wy, gridStep)
+  return { x: g.x, y: g.y, snapped: false }
+}
+
+// ── Rotation ─────────────────────────────────────────────────────────────────
+
+export function rotatePoint(
+  px: number,
+  py: number,
+  cx: number,
+  cy: number,
+  angle: number
+): Point {
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  const dx = px - cx
+  const dy = py - cy
+  return {
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos,
+  }
+}
