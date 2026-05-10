@@ -43,7 +43,7 @@ function getMeasurementText(
     case 'circle': {
       const c = el as Partial<CircleElement>
       if (!c.radius) return null
-      return `r ${formatLength(c.radius)}  ⌀ ${formatLength(c.radius * 2)}`
+      return `r ${formatLength(c.radius)} ⌀ ${formatLength(c.radius * 2)}`
     }
     case 'poly': {
       const p = el as Partial<PolyElement>
@@ -62,7 +62,7 @@ function getMeasurementText(
         pts[pts.length - 1].y - pts[pts.length - 2].y,
       )
       if (pts.length === 2) return formatLength(segLen)
-      return `${formatLength(segLen)}  (${formatLength(total)} total)`
+      return `${formatLength(segLen)} (${formatLength(total)} total)`
     }
     default:
       return null
