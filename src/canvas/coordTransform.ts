@@ -124,7 +124,14 @@ export function snapPoint(
   if (snapX !== null || snapY !== null) {
     const rx = snapX ?? wx
     const ry = snapY ?? wy
-    const alignedAxis = snapX !== null && snapY !== null ? 'xy' : snapX !== null ? 'x' : 'y'
+    let alignedAxis: 'x' | 'y' | 'xy'
+    if (snapX !== null && snapY !== null) {
+      alignedAxis = 'xy'
+    } else if (snapX !== null) {
+      alignedAxis = 'x'
+    } else {
+      alignedAxis = 'y'
+    }
     return { x: rx, y: ry, snapped: true, alignedAxis }
   }
 

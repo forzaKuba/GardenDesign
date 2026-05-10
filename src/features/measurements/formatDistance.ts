@@ -25,6 +25,7 @@ export function formatDistance(metres: number): string {
 
 /** Format an area in square metres for human display. */
 export function formatArea(sqMetres: number): string {
-  if (sqMetres < 0.01) return `${Math.round(sqMetres * 10000)} cm²`
+  // 1 m² = 10 000 cm²
+  if (sqMetres < 0.01) return `${Math.round(sqMetres * 10_000)} cm²`
   return `${sqMetres.toFixed(1)} m²`
 }
