@@ -29,8 +29,8 @@ export function Tooltip({ content, shortcut, children, side = 'right' }: Tooltip
   // Inject aria-describedby on the trigger element so assistive tech
   // announces the tooltip content when it becomes visible.
   const trigger = isValidElement(children)
-    ? cloneElement(children as React.ReactElement, {
-        'aria-describedby': visible ? tooltipId : undefined,
+    ? cloneElement(children, {
+        'aria-describedby': visible ? tooltipId : null,
       })
     : children
 
