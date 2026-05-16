@@ -2,6 +2,7 @@ import type { ToolName } from '@/types/tools'
 
 export const TOOL_KEYS: Partial<Record<string, ToolName>> = {
   v: 'select',
+  h: 'hand',
   r: 'rect',
   p: 'poly',
   c: 'circle',
@@ -18,6 +19,7 @@ export interface ShortcutDef {
 
 export const TOOL_SHORTCUTS: Record<ToolName, string> = {
   select: 'V',
+  hand: 'H',
   rect: 'R',
   poly: 'P',
   circle: 'C',

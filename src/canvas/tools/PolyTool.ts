@@ -1,9 +1,19 @@
 import type { Tool, CanvasPointerEvent, ToolContext } from '@/types/tools'
 import type { PolyElement, Point } from '@/types/elements'
 import { nanoid } from 'nanoid'
+import { applyAngleSnap } from '../angleSnap'
 
 let points: Point[] = []
 let mousePos: { wx: number; wy: number } | null = null
+
+function getConstrainedMouse(e: CanvasPointerEvent): { wx: number; wy: number } {
+  if (e.shiftKey && points.length > 0) {
+    const last = points[points.length - 1]
+    const snapped = applyAngleSnap(last.x, last.y, e.snappedWx, e.snappedWy)
+    return { wx: snapped.x, wy: snapped.y }
+  }
+  return { wx: e.snappedWx, wy: e.snappedWy }
+}
 
 function updatePreview(ctx: ToolContext) {
   if (points.length < 1) {
@@ -74,20 +84,22 @@ export const PolyTool: Tool = {
   },
 
   onMouseDown(e: CanvasPointerEvent, ctx: ToolContext) {
+    const pos = getConstrainedMouse(e)
     // Check if clicking near first point to close
     if (points.length >= 3) {
-      const d = Math.hypot(e.snappedWx - points[0].x, e.snappedWy - points[0].y)
+      const d = Math.hypot(pos.wx - points[0].x, pos.wy - points[0].y)
       if (d < 0.8) {
         close(ctx)
         return
       }
     }
-    points.push({ x: e.snappedWx, y: e.snappedWy })
+    points.push({ x: pos.wx, y: pos.wy })
     updatePreview(ctx)
   },
 
   onMouseMove(e: CanvasPointerEvent, ctx: ToolContext) {
-    mousePos = { wx: e.snappedWx, wy: e.snappedWy }
+    const pos = getConstrainedMouse(e)
+    mousePos = pos
     updatePreview(ctx)
   },
 

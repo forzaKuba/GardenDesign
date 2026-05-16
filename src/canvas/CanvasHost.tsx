@@ -2,60 +2,102 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useGardenStore } from '@/store/gardenStore'
 import { render, RendererState } from './renderer'
 import { drawMinimap } from './minimap'
-import { screenToWorld } from './coordTransform'
+import { screenToWorld, worldToScreen } from './coordTransform'
 import { snapPoint } from './coordTransform'
 import { topElementAt } from './hitTest'
 import { toolRegistry } from './tools/index'
 import { useRAFLoop } from '@/hooks/useRAFLoop'
 import type { GardenElement } from '@/types/elements'
-import type { LineElement, RectElement, CircleElement, PolyElement } from '@/types/elements'
+import type { LineElement, RectElement, CircleElement, PolyElement, DimensionElement } from '@/types/elements'
 import type { CanvasPointerEvent } from '@/types/tools'
 import { MIN_ZOOM, MAX_ZOOM } from '@/constants/grid'
 import { formatDistance } from '@/features/measurements/formatDistance'
 
 // ── Measurement tooltip helpers ───────────────────────────────────────────────
 
-function getMeasurementText(
+interface MeasurementInfo {
+  text: string
+  /** Screen position for the tooltip anchor (near segment midpoint when available). */
+  sx: number
+  sy: number
+}
+
+function getMeasurementInfo(
   el: Partial<GardenElement> | null,
   activeTool: string,
+  cursorSx: number,
+  cursorSy: number,
+  view: { panX: number; panY: number; zoom: number },
   pencilRunningLength?: number,
-): string | null {
+): MeasurementInfo | null {
   if (!el) return null
+
+  function segMid(ax: number, ay: number, bx: number, by: number) {
+    const sp = worldToScreen((ax + bx) / 2, (ay + by) / 2, view)
+    return { sx: sp.x, sy: sp.y }
+  }
+
   switch (el.type) {
     case 'line': {
       const pts = (el as Partial<LineElement>).points
       if (!pts || pts.length < 2) return null
       const len = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)
-      return formatDistance(len)
+      const { sx, sy } = segMid(pts[0].x, pts[0].y, pts[1].x, pts[1].y)
+      return { text: formatDistance(len), sx: sx + 8, sy: sy - 20 }
     }
     case 'rect': {
       const r = el as Partial<RectElement>
       if (r.width == null || r.height == null) return null
-      return `${formatDistance(r.width)} × ${formatDistance(r.height)}`
+      return {
+        text: `${formatDistance(r.width)} × ${formatDistance(r.height)}`,
+        sx: cursorSx + 18,
+        sy: cursorSy - 36,
+      }
     }
     case 'circle': {
       const c = el as Partial<CircleElement>
       if (c.radius == null) return null
-      return `r ${formatDistance(c.radius)} ⌀ ${formatDistance(c.radius * 2)}`
+      return {
+        text: `r ${formatDistance(c.radius)} ⌀ ${formatDistance(c.radius * 2)}`,
+        sx: cursorSx + 18,
+        sy: cursorSy - 36,
+      }
     }
     case 'poly': {
       const p = el as Partial<PolyElement>
       if (!p.points || p.points.length < 2) return null
       const pts = p.points
       // For pencil free-draw: use O(1) running total tracked by the caller
-      if (activeTool === 'pencil') return formatDistance(pencilRunningLength ?? 0)
-      // For poly tool: show current segment length + running total
-      const segLen = Math.hypot(
-        pts[pts.length - 1].x - pts[pts.length - 2].x,
-        pts[pts.length - 1].y - pts[pts.length - 2].y,
-      )
-      if (pts.length === 2) return formatDistance(segLen)
+      if (activeTool === 'pencil') {
+        return {
+          text: formatDistance(pencilRunningLength ?? 0),
+          sx: cursorSx + 18,
+          sy: cursorSy - 36,
+        }
+      }
+      // For poly tool: show current segment length near segment midpoint
+      const last = pts[pts.length - 1]
+      const prev = pts[pts.length - 2]
+      const segLen = Math.hypot(last.x - prev.x, last.y - prev.y)
+      const { sx, sy } = segMid(prev.x, prev.y, last.x, last.y)
+      if (pts.length === 2) return { text: formatDistance(segLen), sx: sx + 8, sy: sy - 20 }
       // Compute total only for committed poly points (small n, not pencil)
       let total = 0
       for (let i = 1; i < pts.length; i++) {
         total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
       }
-      return `${formatDistance(segLen)} (${formatDistance(total)} total)`
+      return {
+        text: `${formatDistance(segLen)}  (${formatDistance(total)} total)`,
+        sx: sx + 8,
+        sy: sy - 20,
+      }
+    }
+    case 'dimension': {
+      const d = el as Partial<DimensionElement>
+      if (d.x1 == null || d.y1 == null || d.x2 == null || d.y2 == null) return null
+      const len = Math.hypot(d.x2 - d.x1, d.y2 - d.y1)
+      const { sx, sy } = segMid(d.x1, d.y1, d.x2, d.y2)
+      return { text: formatDistance(len), sx: sx + 8, sy: sy - 20 }
     }
     default:
       return null
@@ -195,8 +237,8 @@ export default function CanvasHost() {
       canvas!.setPointerCapture(e.pointerId)
       const view = store.getState().view
 
-      // Middle mouse or Space+LMB → pan
-      if (e.button === 1 || (e.button === 0 && spaceDown.current)) {
+      // Middle mouse, Space+LMB, or Hand tool → pan
+      if (e.button === 1 || (e.button === 0 && spaceDown.current) || (e.button === 0 && activeToolName.current === 'hand')) {
         panStart.current = { sx: e.clientX, sy: e.clientY, px: view.panX, py: view.panY }
         canvas!.style.cursor = 'grabbing'
         store.getState().setUI({ ...store.getState().ui })
@@ -252,12 +294,19 @@ export default function CanvasHost() {
       // Live measurement tooltip
       const tt = measureTooltipRef.current
       if (tt) {
-        const text = getMeasurementText(previewEl.current, activeToolName.current, pencilRunningLength.current)
-        if (text) {
-          tt.textContent = text
-          // Offset tooltip to the right and slightly above the cursor
-          tt.style.left = `${sx + 18}px`
-          tt.style.top = `${sy - 36}px`
+        const view = store.getState().view
+        const info = getMeasurementInfo(
+          previewEl.current,
+          activeToolName.current,
+          sx,
+          sy,
+          view,
+          pencilRunningLength.current,
+        )
+        if (info) {
+          tt.textContent = info.text
+          tt.style.left = `${info.sx}px`
+          tt.style.top = `${info.sy}px`
           tt.style.display = 'block'
         } else {
           tt.style.display = 'none'
@@ -273,11 +322,17 @@ export default function CanvasHost() {
     }
 
     function onPointerUp(e: PointerEvent) {
-      // Hide measurement tooltip on release and reset pencil state
-      const tt = measureTooltipRef.current
-      if (tt) tt.style.display = 'none'
-      pencilRunningLength.current = 0
-      pencilPrevPointsLen.current = 0
+      // For click-based tools (poly, dimension) keep the tooltip visible so the
+      // next segment distance shows on the following mousemove; only hide for
+      // drag-based tools (line, rect, circle, pencil) and pan.
+      const clickBasedTools = new Set(['poly', 'dimension'])
+      const isDragBased = !clickBasedTools.has(activeToolName.current)
+      if (isDragBased) {
+        const tt = measureTooltipRef.current
+        if (tt) tt.style.display = 'none'
+        pencilRunningLength.current = 0
+        pencilPrevPointsLen.current = 0
+      }
 
       if (panStart.current) {
         panStart.current = null
@@ -439,5 +494,6 @@ export default function CanvasHost() {
 
 function getCursorForTool(tool: string): string {
   if (tool === 'select') return 'default'
+  if (tool === 'hand') return 'grab'
   return 'crosshair'
 }

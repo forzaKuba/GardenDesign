@@ -3,6 +3,7 @@ import type { Layer } from './layers'
 
 export type ToolName =
   | 'select'
+  | 'hand'
   | 'rect'
   | 'poly'
   | 'circle'
