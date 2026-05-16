@@ -84,6 +84,22 @@ export function render(
     ctx.globalAlpha = 0.55
     drawElement(ctx, previewElement as GardenElement, view, false, false, true, scheduleRender)
     ctx.globalAlpha = 1
+
+    // Segment length labels during poly/line drawing (full opacity)
+    if (view.zoom >= 8) {
+      const prev = previewElement as GardenElement
+      if ((prev.type === 'poly' || prev.type === 'line') && prev.points.length >= 2) {
+        ctx.save()
+        ctx.setLineDash([])
+        ctx.font = dimensionFont(view.zoom)
+        ctx.fillStyle = 'rgba(20,80,180,0.88)'
+        ctx.textAlign = 'center'
+        for (let i = 0; i < prev.points.length - 1; i++) {
+          drawSegmentLength(ctx, prev.points[i], prev.points[i + 1], view)
+        }
+        ctx.restore()
+      }
+    }
   }
 
   // 5. Drag-select rect
@@ -622,6 +638,41 @@ function drawSelectionHandles(
 
 // ── Dimension display for selected elements ───────────────────────────────────
 
+/** Segments shorter than this (metres) are not labelled to avoid visual clutter. */
+const MIN_SEGMENT_LABEL_M = 0.05
+
+/** Font string for dimension / measurement labels, scaled with zoom. */
+function dimensionFont(zoom: number): string {
+  return `400 ${Math.max(9, Math.min(11, 11 * (zoom / 40)))}px DM Mono, monospace`
+}
+
+/** Draws the length label at the midpoint of segment a→b, rotated to follow the segment. */
+function drawSegmentLength(
+  ctx: CanvasRenderingContext2D,
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  view: ViewState
+): void {
+  const len = Math.hypot(b.x - a.x, b.y - a.y)
+  if (len < MIN_SEGMENT_LABEL_M) return
+  const mx = (a.x + b.x) / 2
+  const my = (a.y + b.y) / 2
+  const sm = worldToScreen(mx, my, view)
+  const angle = Math.atan2(b.y - a.y, b.x - a.x)
+  // Normalize to avoid upside-down labels
+  let drawAngle = angle
+  if (drawAngle > Math.PI / 2 || drawAngle < -Math.PI / 2) drawAngle += Math.PI
+  ctx.save()
+  ctx.textBaseline = 'middle'
+  ctx.translate(sm.x, sm.y)
+  ctx.rotate(drawAngle)
+  ctx.shadowColor = 'rgba(255,255,255,0.92)'
+  ctx.shadowBlur = 4
+  ctx.fillText(formatDistance(len), 0, -9)
+  ctx.shadowBlur = 0
+  ctx.restore()
+}
+
 function drawDimensions(
   ctx: CanvasRenderingContext2D,
   el: GardenElement,
@@ -632,7 +683,7 @@ function drawDimensions(
 
   ctx.save()
   ctx.setLineDash([])
-  ctx.font = `400 ${Math.max(9, Math.min(11, 11 * (view.zoom / 40)))}px DM Mono, monospace`
+  ctx.font = dimensionFont(view.zoom)
   ctx.fillStyle = 'rgba(20,80,180,0.88)'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
@@ -651,18 +702,15 @@ function drawDimensions(
     ctx.fillText(`⌀ ${formatDistance(el.radius * 2)}`, sb.x, sb.y + 4)
   } else if (el.type === 'line') {
     const pts = el.points
-    if (pts.length >= 2) {
-      const last = pts[pts.length - 1]
-      const len = pts.reduce((s, _p, i) => {
-        if (i === 0) return 0
-        return s + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
-      }, 0)
-      const sm = worldToScreen((pts[0].x + last.x) / 2, (pts[0].y + last.y) / 2, view)
-      ctx.fillText(formatDistance(len), sm.x, sm.y - 14)
+    for (let i = 0; i < pts.length - 1; i++) {
+      drawSegmentLength(ctx, pts[i], pts[i + 1], view)
     }
-  } else if (el.type === 'poly' && el.closed) {
-    const sb = worldToScreen(b.x + b.w / 2, b.y + b.h, view)
-    ctx.fillText(`${formatDistance(b.w)} × ${formatDistance(b.h)}`, sb.x, sb.y + 4)
+  } else if (el.type === 'poly') {
+    const pts = el.points
+    const segCount = el.closed ? pts.length : pts.length - 1
+    for (let i = 0; i < segCount; i++) {
+      drawSegmentLength(ctx, pts[i], pts[(i + 1) % pts.length], view)
+    }
   }
 
   ctx.textBaseline = 'alphabetic'
