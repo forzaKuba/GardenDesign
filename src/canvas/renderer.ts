@@ -94,9 +94,13 @@ export function render(
         ctx.font = dimensionFont(view.zoom)
         ctx.fillStyle = 'rgba(20,80,180,0.88)'
         ctx.textAlign = 'center'
-        for (let i = 0; i < prev.points.length - 1; i++) {
+        // Draw all placed segment labels at their midpoints
+        for (let i = 0; i < prev.points.length - 2; i++) {
           drawSegmentLength(ctx, prev.points[i], prev.points[i + 1], view)
         }
+        // Draw the active segment (last placed → cursor) as a badge near the cursor dot
+        const li = prev.points.length - 2
+        drawSegmentLengthAtEndpoint(ctx, prev.points[li], prev.points[li + 1], view)
         ctx.restore()
       }
     }
@@ -662,14 +666,64 @@ function drawSegmentLength(
   // Normalize to avoid upside-down labels
   let drawAngle = angle
   if (drawAngle > Math.PI / 2 || drawAngle < -Math.PI / 2) drawAngle += Math.PI
+  const text = formatDistance(len)
+  const padX = 4
+  const textW = ctx.measureText(text).width
   ctx.save()
   ctx.textBaseline = 'middle'
   ctx.translate(sm.x, sm.y)
   ctx.rotate(drawAngle)
-  ctx.shadowColor = 'rgba(255,255,255,0.92)'
-  ctx.shadowBlur = 4
-  ctx.fillText(formatDistance(len), 0, -9)
-  ctx.shadowBlur = 0
+  // Solid background box behind the label (replaces blurry shadow).
+  // textBaseline is 'middle' and fillText y-offset is -9 px, so the
+  // 14 px-tall box centred on y=-9 spans [-16, -2] in local coords.
+  ctx.fillStyle = 'rgba(255,255,255,0.92)'
+  ctx.fillRect(-textW / 2 - padX, -16, textW + padX * 2, 14)
+  ctx.fillStyle = 'rgba(20,80,180,0.95)'
+  ctx.fillText(text, 0, -9)
+  ctx.restore()
+}
+
+/** Draws a measurement badge next to the cursor endpoint b during active poly/line drawing. */
+function drawSegmentLengthAtEndpoint(
+  ctx: CanvasRenderingContext2D,
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  view: ViewState
+): void {
+  const len = Math.hypot(b.x - a.x, b.y - a.y)
+  if (len < MIN_SEGMENT_LABEL_M) return
+  const sb = worldToScreen(b.x, b.y, view)
+  const text = formatDistance(len)
+  const padX = 7
+  const textW = ctx.measureText(text).width
+  const bw = textW + padX * 2
+  const bh = 18
+  // Position above and to the right of the cursor dot
+  const ox = 14
+  const oy = -26
+  ctx.save()
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  // Dark blue background pill
+  ctx.fillStyle = 'rgba(15,55,155,0.93)'
+  ctx.beginPath()
+  const rx = sb.x + ox - bw / 2
+  const ry = sb.y + oy - bh / 2
+  const r = 4 // corner radius for the badge pill
+  ctx.moveTo(rx + r, ry)
+  ctx.lineTo(rx + bw - r, ry)
+  ctx.arcTo(rx + bw, ry, rx + bw, ry + r, r)
+  ctx.lineTo(rx + bw, ry + bh - r)
+  ctx.arcTo(rx + bw, ry + bh, rx + bw - r, ry + bh, r)
+  ctx.lineTo(rx + r, ry + bh)
+  ctx.arcTo(rx, ry + bh, rx, ry + bh - r, r)
+  ctx.lineTo(rx, ry + r)
+  ctx.arcTo(rx, ry, rx + r, ry, r)
+  ctx.closePath()
+  ctx.fill()
+  // White text
+  ctx.fillStyle = '#ffffff'
+  ctx.fillText(text, sb.x + ox, sb.y + oy)
   ctx.restore()
 }
 
