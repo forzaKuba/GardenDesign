@@ -1,6 +1,7 @@
 import type { Tool, CanvasPointerEvent, ToolContext } from '@/types/tools'
 import type { LineElement } from '@/types/elements'
 import { nanoid } from 'nanoid'
+import { applyAngleSnap } from '../angleSnap'
 
 let anchor: { wx: number; wy: number } | null = null
 
@@ -18,6 +19,9 @@ export const LineTool: Tool = {
 
   onMouseMove(e: CanvasPointerEvent, ctx: ToolContext) {
     if (!anchor) return
+    const end = e.shiftKey
+      ? applyAngleSnap(anchor.wx, anchor.wy, e.snappedWx, e.snappedWy)
+      : { x: e.snappedWx, y: e.snappedWy }
     ctx.setPreviewElement({
       id: '__preview__',
       type: 'line',
@@ -25,7 +29,7 @@ export const LineTool: Tool = {
       label: '',
       points: [
         { x: anchor.wx, y: anchor.wy },
-        { x: e.snappedWx, y: e.snappedWy },
+        { x: end.x, y: end.y },
       ],
       strokeWidth: 0.1,
       zIndex: 0,
@@ -39,7 +43,10 @@ export const LineTool: Tool = {
 
   onMouseUp(e: CanvasPointerEvent, ctx: ToolContext) {
     if (!anchor) return
-    const len = Math.hypot(e.snappedWx - anchor.wx, e.snappedWy - anchor.wy)
+    const end = e.shiftKey
+      ? applyAngleSnap(anchor.wx, anchor.wy, e.snappedWx, e.snappedWy)
+      : { x: e.snappedWx, y: e.snappedWy }
+    const len = Math.hypot(end.x - anchor.wx, end.y - anchor.wy)
     const a = { ...anchor }
     anchor = null
     ctx.setPreviewElement(null)
@@ -53,7 +60,7 @@ export const LineTool: Tool = {
       label: cat.charAt(0).toUpperCase() + cat.slice(1),
       points: [
         { x: a.wx, y: a.wy },
-        { x: e.snappedWx, y: e.snappedWy },
+        { x: end.x, y: end.y },
       ],
       strokeWidth: 0.1,
       zIndex: ctx.getElements().length,

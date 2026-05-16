@@ -11,6 +11,7 @@ interface ToolDef {
 
 const TOOLS: ToolDef[] = [
   { id: 'select', icon: '↖', label: 'Select / Move' },
+  { id: 'hand', icon: '✋', label: 'Pan / Hand' },
   { id: 'rect', icon: '▭', label: 'Rectangle' },
   { id: 'poly', icon: '⬡', label: 'Polygon' },
   { id: 'circle', icon: '○', label: 'Circle / Tree' },

@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid'
 import type { Tool, ToolName } from '@/types/tools'
 import { SelectTool } from './SelectTool'
+import { HandTool } from './HandTool'
 import { RectTool } from './RectTool'
 import { PolyTool } from './PolyTool'
 import { CircleTool } from './CircleTool'
@@ -11,6 +12,7 @@ import { DimensionTool } from './DimensionTool'
 
 export const toolRegistry: Record<ToolName, Tool> = {
   select: SelectTool,
+  hand: HandTool,
   rect: RectTool,
   poly: PolyTool,
   circle: CircleTool,

@@ -1,6 +1,7 @@
 import type { Tool, CanvasPointerEvent, ToolContext } from '@/types/tools'
 import type { DimensionElement } from '@/types/elements'
 import { nanoid } from 'nanoid'
+import { applyAngleSnap } from '../angleSnap'
 
 let p1: { wx: number; wy: number } | null = null
 
@@ -21,6 +22,9 @@ export const DimensionTool: Tool = {
     if (!p1) {
       p1 = { wx: e.snappedWx, wy: e.snappedWy }
     } else {
+      const end = e.shiftKey
+        ? applyAngleSnap(p1.wx, p1.wy, e.snappedWx, e.snappedWy)
+        : { x: e.snappedWx, y: e.snappedWy }
       // Place dimension element
       const el: DimensionElement = {
         id: nanoid(),
@@ -29,8 +33,8 @@ export const DimensionTool: Tool = {
         label: 'Dimension',
         x1: p1.wx,
         y1: p1.wy,
-        x2: e.snappedWx,
-        y2: e.snappedWy,
+        x2: end.x,
+        y2: end.y,
         offset: -1,
         unit: 'm',
         zIndex: ctx.getElements().length,
@@ -49,6 +53,9 @@ export const DimensionTool: Tool = {
 
   onMouseMove(e: CanvasPointerEvent, ctx: ToolContext) {
     if (!p1) return
+    const end = e.shiftKey
+      ? applyAngleSnap(p1.wx, p1.wy, e.snappedWx, e.snappedWy)
+      : { x: e.snappedWx, y: e.snappedWy }
     ctx.setPreviewElement({
       id: '__preview__',
       type: 'dimension',
@@ -56,8 +63,8 @@ export const DimensionTool: Tool = {
       label: '',
       x1: p1.wx,
       y1: p1.wy,
-      x2: e.snappedWx,
-      y2: e.snappedWy,
+      x2: end.x,
+      y2: end.y,
       offset: -1,
       unit: 'm',
       zIndex: 0,
