@@ -108,6 +108,9 @@ const MM_W = 180
 const MM_H = 130
 const MM_PAD = 12
 
+// Tools that add points on click rather than drag — tooltip should persist between clicks
+const CLICK_BASED_TOOLS = new Set(['poly', 'dimension'])
+
 export default function CanvasHost() {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -238,7 +241,7 @@ export default function CanvasHost() {
       const view = store.getState().view
 
       // Middle mouse, Space+LMB, or Hand tool → pan
-      if (e.button === 1 || (e.button === 0 && spaceDown.current) || (e.button === 0 && activeToolName.current === 'hand')) {
+      if (shouldInitiatePan(e.button, spaceDown.current, activeToolName.current)) {
         panStart.current = { sx: e.clientX, sy: e.clientY, px: view.panX, py: view.panY }
         canvas!.style.cursor = 'grabbing'
         store.getState().setUI({ ...store.getState().ui })
@@ -325,9 +328,7 @@ export default function CanvasHost() {
       // For click-based tools (poly, dimension) keep the tooltip visible so the
       // next segment distance shows on the following mousemove; only hide for
       // drag-based tools (line, rect, circle, pencil) and pan.
-      const clickBasedTools = new Set(['poly', 'dimension'])
-      const isDragBased = !clickBasedTools.has(activeToolName.current)
-      if (isDragBased) {
+      if (!CLICK_BASED_TOOLS.has(activeToolName.current)) {
         const tt = measureTooltipRef.current
         if (tt) tt.style.display = 'none'
         pencilRunningLength.current = 0
@@ -496,4 +497,8 @@ function getCursorForTool(tool: string): string {
   if (tool === 'select') return 'default'
   if (tool === 'hand') return 'grab'
   return 'crosshair'
+}
+
+function shouldInitiatePan(button: number, spaceDown: boolean, toolName: string): boolean {
+  return button === 1 || (button === 0 && spaceDown) || (button === 0 && toolName === 'hand')
 }
